@@ -48,7 +48,7 @@ def generate_augmented_code(txt2llm, augment_idx, apply_quality_control, top_p, 
         if LLM_MODEL == 'mixtral':
             llm_code_generator = submit_mixtral_hf
         elif LLM_MODEL == 'llama3':
-            llm_code_generator = submit_llama3_hf
+            llm_code_generator = submit_llama3_paceice
         elif LLM_MODEL == 'gemini':
             llm_code_generator = submit_gemini_api
         qc_func = llm_code_qc_hf
@@ -177,6 +177,78 @@ def submit_mixtral_hf(txt2mixtral, max_new_tokens=1024, top_p=0.15, temperature=
     else:
         return results[0]
     
+def submit_llama3_paceice(txt2llama, max_new_tokens=1024, top_p=0.15, temperature=0.1, 
+                        model_path="/storage/ice-shared/vip-vvk/llm_storage/meta-llama/Llama-3.3-70B-Instruct", 
+                        return_gen=False):
+    """Submits a prompt to the Llama-3.3-70B-Instruct model on PACE-ICE.
+
+    This function loads the specified Llama 3 model from a local path, formats
+    the input prompt into a chat template, and generates a response. Note that
+    the 'max_new_tokens' argument is overridden internally by a random value
+    between 2000 and 2400.
+
+    Args:
+        txt2llama (str): The input prompt to send to the model.
+        max_new_tokens (int, optional): The maximum number of new tokens to
+            generate. Defaults to 1024, but is ignored.
+        top_p (float, optional): The nucleus sampling probability. Defaults to 0.15.
+        temperature (float, optional): The sampling temperature for generation.
+            Defaults to 0.1.
+        model_path (str, optional): The local file path to the Llama-3.3-70B
+            model directory. Defaults to a shared path on the PACE-ICE cluster.
+        return_gen (bool, optional): If True, returns a tuple containing the
+            result text and None. Defaults to False.
+
+    Returns:
+        str or tuple[str, None]: The generated text if 'return_gen' is False.
+        Otherwise, a tuple containing the generated text and None.
+    """
+
+    max_new_tokens = np.random.randint(6000, 8000)  # Randomize new tokens
+    print("Utilizing llama3.3-70B-Instruct")
+    device = "cuda" if torch.cuda.is_available() else "cpu"  # Use GPU if available
+
+    # Load Model & Tokenizer Locally
+    tokenizer = transformers.AutoTokenizer.from_pretrained(model_path, local_files_only=True)
+    model = transformers.AutoModelForCausalLM.from_pretrained(
+        model_path,
+        local_files_only=True,
+        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,  # Use bfloat16 for GPUs
+        device_map="auto"
+    ).eval()  # Set to eval mode
+
+    instructions = [
+        {"role": "user", "content": "Provide code in Python\n" + txt2llama}
+    ]
+    
+    # Convert instructions to model format
+    prompt = tokenizer.apply_chat_template(instructions, tokenize=False)
+
+    # Tokenize Input
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+
+    # Generate Output
+    with torch.no_grad():
+        output = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            do_sample=True,
+        )
+
+    # Decode & Return Result
+    # Slice off the prompt tokens. model.generate() returns prompt+completion, so
+    # decoding output[0] whole echoes the prompt back - and clean_code_from_llm()
+    # takes split("```")[1], the FIRST fence, which is then the original block
+    # quoted in the prompt rather than the model's rewrite. That silently made
+    # every mutated individual a byte-identical clone of its parent.
+    gen_only = output[0][inputs["input_ids"].shape[-1]:]
+    result_text = tokenizer.decode(gen_only, skip_special_tokens=True)
+
+    return (result_text, None) if return_gen else result_text
+
+
 def submit_llama3_hf(txt2llama, max_new_tokens=1024, top_p=0.15, temperature=0.1, 
                       model_id="meta-llama/Meta-Llama-3.1-70B-Instruct", return_gen=False):
     """
@@ -301,7 +373,7 @@ def mutate_prompts(n=5):
         if LLM_MODEL == 'mixtral':
             llm_code_generator = submit_mixtral_hf
         elif LLM_MODEL == 'llama3':
-            llm_code_generator = submit_llama3_hf
+            llm_code_generator = submit_llama3_paceice
         output = llm_code_generator(prompt, temperature=temp).strip()
         if "```" in output:
             output = output.split("```")[0]

@@ -1,10 +1,36 @@
-sota/Data
-sota/PNPP
-sota/Point-Transformers
+
+# --- SLURM job logs (quantum seed work) ---
+slurm-*.out
+slurm-*.err
+llm_opt_*.out
+llm_opt_*.err
+vqc_seed_*.out
+vqc_seed_*.err
+conda_deps_*.out
+conda_deps_*.err
+
+# --- uv environment ---
+.venv/
+
+# --- per-generation scratch and run outputs ---
+0/
+first_test/
+
+# --- quantum seed run artifacts (the seed itself IS tracked) ---
+sota/QuantumVQC/models/
+sota/QuantumVQC/results/
+
+# --- python bytecode ---
 __pycache__/
-xXx*
-network_xXx*
-sota/ExquisiteNetV2/cifar-10-batches-py
-*.bmp
-build/
-tests/*/outputs
+*.pyc
+
+# --- timestamped backups taken before in-place patches ---
+*.bak.*
+
+# --- job-id handoff files written by run.sh / pareto_after.sbatch ---
+.long_run_jobid
+.pareto_job_id
+.smoke_run_jobid
+
+# --- archived run outputs (regenerable from tools/pareto_report.py) ---
+runs/

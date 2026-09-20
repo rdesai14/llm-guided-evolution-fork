@@ -15,4 +15,13 @@ dependencies = [
     "torch==2.6.0",
     "torchvision",
     "transformers",
+    # Required by device_map="auto", which shards Llama-3.3-70B across both
+    # GPUs. transformers raises ValueError without it. Missing upstream.
+    "accelerate",
+    # --- quantum seed (sota/QuantumVQC) ---
+    "qiskit>=2.0",
+    "scikit-learn",
+    "scipy",
+    "matplotlib",
+    "pylatexenc",
 ]

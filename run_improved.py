@@ -227,7 +227,11 @@ def check_contents_for_error(contents):
     else:
         return None
         
-def check4job_completion(job_id, local_output=None, check_interval=60, timeout=120): # 3600 * 3
+# timeout was 120s, which is shorter than a cold load of Llama-3.3-70B off shared
+# storage (263GB / 723 shards, ~20 min). The orchestrator gave up before the LLM
+# had written its variant, so every individual was marked invalid and the
+# population stayed at 0. 3600*3 is the value the original comment carried.
+def check4job_completion(job_id, local_output=None, check_interval=60, timeout=3600 * 3):
     """
     Check for the completion of a job by searching for its output file and scanning for errors.
 
@@ -321,7 +325,7 @@ def create_individual(container, temp_min=0.05, temp_max=0.4):
     return individual
     
 def submit_run(gene_id):
-    def write_bash_script_py(gene_id, train_file='./sota/ExquisiteNetV2/train.py'):
+    def write_bash_script_py(gene_id, train_file='./sota/QuantumVQC/train.py'):
         if not MACOS:
             tmp = f"-data {DATA_PATH} -end_lr 0.001 -seed 21 -val_r 0.2 -amp"
         else:
@@ -412,14 +416,24 @@ def check4results(gene_id):
         # The job saves the model results to a file f'{gene_id}_results.txt'
         # results_path = os.path.join(out_dir, f'{gene_id}_results.txt')
         results_path = f'{SOTA_ROOT}/results/{gene_id}_results.txt'
-        with open(results_path, 'r') as file:
-            results = file.read()
-        results = results.split(',')
-        fitness = [float(r.strip()) for r in results]
-        # TODO: get all features later
-        fitness = [fitness[0], fitness[1]]
-        fitness = tuple(fitness)
-        
+        # A job can exit cleanly and still write no usable results - the LLM is free
+        # to rewrite main() into something that never calls write_results(), and
+        # train.py prints the completion sentinel regardless. That is a dead
+        # individual, not a crash: per the fitness contract a missing or malformed
+        # results file means INVALID_FITNESS_MAX. Without this guard one such gene
+        # takes the whole orchestrator down with FileNotFoundError and the run dies
+        # mid-generation - it killed 5866829 at 1:17 on gene xXxczCaC.
+        try:
+            with open(results_path, 'r') as file:
+                results = file.read()
+            results = results.split(',')
+            fitness = [float(r.strip()) for r in results]
+            # TODO: get all features later
+            fitness = tuple([fitness[0], fitness[1]])
+        except (OSError, ValueError, IndexError) as e:
+            print('\t' + chr(9760) + f' No usable results for {gene_id}: {type(e).__name__} - {e}', flush=True)
+            fitness = INVALID_FITNESS_MAX
+
         GLOBAL_DATA[gene_id]['status'] = 'completed'
         GLOBAL_DATA[gene_id]['fitness'] = fitness
         # print(f'Model from Gene: {gene_id} Evaluated')
@@ -834,7 +848,12 @@ TOP_N_GENES = None
 LINKED_GENES = {}
 GLOBAL_DATA = {}
 GLOBAL_DATA_HIST = {}
-GLOBAL_DATA_ANCESTRY = {}
+# Seed the root ancestor. create_individual() calls submit_bash() -> write_bash_script()
+# -> update_ancestry(child, parent='network') BEFORE it registers anything in the
+# ancestry dict, so a first run from an empty checkpoint raises KeyError: 'network'.
+# fetch_gene() maps the seed file network.py to the id 'network', and the seed is
+# genuinely the root of the tree, so an empty-lineage entry is the correct value.
+GLOBAL_DATA_ANCESTRY = {'network': {'GENES': [], 'MUTATE_TYPE': []}}
 # Main Evolution Loop
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run Generation')
@@ -970,7 +989,11 @@ if __name__ == "__main__":
         save_checkpoint(gen, folder_name=args.checkpoints)
         LINKED_GENES = {}
         # mutate x prompts
-        mutate_prompts()
+        # DISABLED: mutate_prompts() calls submit_llama3_paceice IN THIS PROCESS,
+        # loading Llama-3.3-70B once per template. The orchestrator holds gpu:1 and
+        # 16G, so it died here right after generation 0 (job 5865171, FAILED 2:28).
+        # n=0 makes np.random.choice return empty, so the loop body never runs.
+        mutate_prompts(0)
         
     print("-- End of Evolution --")
     best_ind = tools.selBest(population, 1)[0]
