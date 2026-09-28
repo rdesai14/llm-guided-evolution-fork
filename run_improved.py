@@ -816,6 +816,17 @@ def load_checkpoint(folder_name="checkpoints", checkpoint_file=None):
 
 def true_nsga2(pop, k):
     pop = tools.selNSGA2(pop, len(pop)) # 10 diff
+    # selTournamentDCD requires k <= len(pop), and k divisible by 4 when it equals
+    # len(pop). A generation with fewer valid individuals than population_size used
+    # to raise here and kill the whole run - 5953309 died at generation 0 with 13
+    # valid individuals of 30 and population_size 16, after 2h13m. Select what is
+    # actually there instead.
+    if k > len(pop):
+        k = len(pop) - (len(pop) % 4)
+        print(f"\t! only {len(pop)} valid individuals, selecting {k} parents", flush=True)
+    if k < 4:
+        print(f"\t! {len(pop)} valid individuals, passing them all through", flush=True)
+        return list(pop)
     new_pop = tools.selTournamentDCD(pop, k) # mults of 4
     return new_pop
 

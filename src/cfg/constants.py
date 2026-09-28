@@ -68,12 +68,12 @@ PROB_EOT = 0.25
 num_generations = 40  # Number of generations
 
 #: Population size for launching optimization
-start_population_size = 30
+start_population_size = 48
 # start_population_size = 144   # Size of the population 124=72
 #population_size = 44 # with cx_prob (0.25) and mute_prob (0.7) you get about %50 successful turnover
 
 #: Population size to utilize in each generation after optimization begins
-population_size = 8 # with cx_prob (0.25) and mute_prob (0.7) you get about %50 successful turnover
+population_size = 16 # with cx_prob (0.25) and mute_prob (0.7) you get about %50 successful turnover
 
 crossover_probability = 0.35  #: Probability of mating two individuals
 mutation_probability = 0.8 	  #: Probability of mutating an individual
