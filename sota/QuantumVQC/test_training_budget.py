@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory() as tmp:
         f = pathlib.Path(tmp) / f"v_{name}.py"
         f.write_text(src)
         out = pathlib.Path(tmp) / name
-        r = subprocess.run([PY, str(f), "--gene-id", name, "--out-dir", str(out), "--repr", ""],
+        r = subprocess.run([PY, str(f), "--gene-id", name, "--out-dir", str(out)],
                            capture_output=True, text=True, timeout=1800)
         mfile = out / f"{name}_metrics.json"
         if r.returncode != 0 or not mfile.exists():

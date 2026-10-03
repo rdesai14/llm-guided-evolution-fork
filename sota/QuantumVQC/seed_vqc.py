@@ -11,13 +11,14 @@ Contract with the LLM-GE harness:
   python seed_vqc.py --gene-id <id> --out-dir <dir>
 writes "<obj1>, <obj2>" to <out_dir>/<gene_id>_results.txt, matching
 run_improved.py check4results(). Both objectives are MINIMIZED:
-  obj1 = validation cross-entropy   (task performance)
-  obj2 = weighted gate cost         (two-qubit gates cost 5x, per hardware error rates)
+  obj1 = 1 - validation accuracy, averaged over N_STARTS trainings
+  obj2 = gate count
 A crash, an invalid circuit, or a missing file leaves the harness to assign
 INVALID_FITNESS_MAX, which is the intended failure path - do not catch broadly
 and report a fake score.
 
-Fitness is computed on VALIDATION. Test is never touched here.
+Fitness is computed on VALIDATION. Every circuit is also scored on test right after
+training, like ExquisiteNetV2 does, but test only goes into <gene>_metrics.json.
 """
 
 import argparse
@@ -45,20 +46,19 @@ SEED = 42
 N_QUBITS = 4
 N_CLASSES = 3
 READOUT = [0, 1]          # ceil(log2(3)) = 2, EXAQC's readout sizing
-TWO_QUBIT_COST = 5.0      # two-qubit error rates are ~an order of magnitude worse
 MAX_GATE_COST = 500.0     # cost ceiling; runaway circuits are not interesting
 
 
 def load_data():
     """Fixed split, shared by every individual. Scaler is fit on TRAIN ONLY.
 
-    Test is held out at test_size=0.3 / random_state=42 so it stays identical to
-    every number recorded before evolution existed. Validation is carved out of
-    the training portion, so nothing about the test set moves.
+    60/20/20: test is 20% (30 flowers), validation is a quarter of the rest (30),
+    training is what's left (90). Changed from test_size=0.3 on 2026-09-30, so runs
+    5954305 and earlier (78/27/45) are not comparable with runs after it.
     """
     X, y = load_iris(return_X_y=True)
     X_tr_full, X_te, y_tr_full, y_te = train_test_split(
-        X, y, test_size=0.3, random_state=SEED, stratify=y)
+        X, y, test_size=0.2, random_state=SEED, stratify=y)
     X_tr, X_va, y_tr, y_va = train_test_split(
         X_tr_full, y_tr_full, test_size=0.25, random_state=SEED, stratify=y_tr_full)
 
@@ -71,17 +71,6 @@ def gate_count(qc):
     """Objective 2. Plain gate count, the "# Gates" column EXAQC reports."""
     return float(sum(1 for inst in qc.data
                      if inst.operation.name not in ("barrier", "measure")))
-
-
-def weighted_gate_cost(qc):
-    """Hardware-weighted count. Kept for reference; obj2 uses gate_count()."""
-    cost = 0.0
-    for inst in qc.data:
-        if inst.operation.name in ("barrier", "measure"):
-            continue
-        cost += TWO_QUBIT_COST if inst.operation.num_qubits >= 2 else 1.0
-    return cost
-
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +86,7 @@ _PASSES = 0                     # forward() calls made while training
 _PASS_LIMIT = None              # set in main() once the training set size is known
 _COUNTING = False               # only training counts, scoring afterwards does not
 _BEST = [float("inf"), None]    # best (training loss, weights) seen while training
+N_STARTS = 10                   # trainings per individual from different starting angles; obj1 averages them
 
 
 class BudgetSpent(Exception):
@@ -145,75 +135,12 @@ def write_results(out_dir, gene_id, obj1, obj2, extra=None):
     return path
 
 
-def count_dead_gates(qc, x_params, w_params, w_vals, tol=1e-2):
-    """§7: EXAQC's champion circuits carried dead gates - R(0) no-ops, H.H = I.
-    Report them alongside accuracy instead of silently inheriting the pathology.
-
-    Only TRAINABLE rotations are assessed. Binding the inputs too would score
-    every RY(x[i]) encoding gate as dead whenever that feature happens to be 0,
-    which says nothing about the architecture - "is this gate dead" is ill-posed
-    for a gate whose angle changes with every sample. Leaving x symbolic makes
-    float() raise on those, and the except-branch skips them.
-    """
-    bound = qc.assign_parameters(dict(zip(w_params, w_vals)))
-    dead = rotations = 0
-    for inst in bound.data:
-        if not inst.operation.params:
-            continue
-        try:
-            angle = float(inst.operation.params[0])
-        except (TypeError, ValueError):
-            continue
-        rotations += 1
-        r = abs(angle) % (2 * np.pi)
-        if min(r, 2 * np.pi - r) < tol:
-            dead += 1
-    return dead, rotations
-
-
-def emit_representations(qc, out_dir, gene_id, arms=("qasm", "ascii", "image")):
-    """H2 ablation (§1): three views of the SAME circuit object.
-
-    Rendered UNBOUND so parameter names stay visible - that is the architecture
-    the LLM is being asked to edit, and it maps onto the OPTION blocks below.
-    Protected on purpose: an individual must not be able to rewrite how it is
-    presented to the LLM.
-    """
-    os.makedirs(out_dir, exist_ok=True)
-    written = {}
-
-    if "qasm" in arms:
-        from qiskit.qasm3 import dumps          # qc.qasm() was removed in qiskit 2.x
-        path = os.path.join(out_dir, f"{gene_id}_circuit.qasm")
-        with open(path, "w") as f:
-            f.write(dumps(qc))
-        written["qasm"] = path
-
-    if "ascii" in arms:
-        path = os.path.join(out_dir, f"{gene_id}_circuit.txt")
-        with open(path, "w") as f:
-            f.write(str(qc.draw("text")))
-        written["ascii"] = path
-
-    if "image" in arms:
-        import matplotlib
-        matplotlib.use("Agg")                   # PACE has no display; must precede pyplot
-        import matplotlib.pyplot as plt
-        path = os.path.join(out_dir, f"{gene_id}_circuit.png")
-        fig = qc.draw("mpl")                    # needs pylatexenc
-        fig.savefig(path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        written["image"] = path
-
-    return written
-
-
-def main():
+def main(n_starts=N_STARTS):
+    # n_starts is bound here, when the protected header runs, so a block that
+    # rebinds N_STARTS cannot change how many times an individual is trained.
     ap = argparse.ArgumentParser()
     ap.add_argument("--gene-id", default="seed")
     ap.add_argument("--out-dir", default="results")
-    ap.add_argument("--repr", default="qasm,ascii,image",
-                    help="H2 arms to emit; empty string to skip")
     args = ap.parse_args()
 
     t0 = time.perf_counter()
@@ -223,28 +150,50 @@ def main():
     if len(wp) == 0:
         raise ValueError("circuit has no trainable parameters")
 
-    global _COUNTING, _PASS_LIMIT
+    # Multi-start (2026-10-03). One training run is a lottery: the seed alone scored
+    # 76.7-93.3% validation over 20 starting points, so a single-start "win" over it
+    # meant nothing. Every circuit is now trained N_STARTS times from different
+    # starting angles (SEED, SEED+1, ...), each with the full training budget, and
+    # every score below is the average over the starts.
+    global _COUNTING, _PASS_LIMIT, _PASSES, SEED
     _PASS_LIMIT = TRAIN_BUDGET_EVALS * len(X_tr)
-    _COUNTING = True
-    try:
-        w = train_angles(qc, xp, wp, X_tr, y_tr)
-    except BudgetSpent:
-        if _BEST[1] is None:
-            raise                      # trained without using cross_entropy: no angles to keep
-        w = _BEST[1]
-    finally:
-        _COUNTING = False
+    base_seed, starts = SEED, []
+    for k in range(n_starts):
+        SEED = base_seed + k               # train_angles reads SEED for its starting angles
+        _PASSES = 0
+        _BEST[0], _BEST[1] = float("inf"), None
+        _COUNTING = True
+        try:
+            w = train_angles(qc, xp, wp, X_tr, y_tr)
+        except BudgetSpent:
+            if _BEST[1] is None:
+                raise                      # trained without using cross_entropy: no angles to keep
+            w = _BEST[1]
+        finally:
+            _COUNTING = False
+        # Every circuit is also scored on test as soon as it is trained, the way
+        # ExquisiteNetV2's train.py scores every individual (2026-10-01). Test is
+        # recorded in the metrics file only; selection reads validation.
+        starts.append({
+            "seed": SEED, "train_passes": _PASSES,
+            "val_accuracy": accuracy(qc, xp, wp, w, X_va, y_va),
+            "val_cross_entropy": cross_entropy(qc, xp, wp, w, X_va, y_va),
+            "test_accuracy": accuracy(qc, xp, wp, w, X_te, y_te),
+            "test_cross_entropy": cross_entropy(qc, xp, wp, w, X_te, y_te),
+            "train_accuracy": accuracy(qc, xp, wp, w, X_tr, y_tr),
+            "train_cross_entropy": cross_entropy(qc, xp, wp, w, X_tr, y_tr),
+        })
+    SEED = base_seed
+    avg = {key: float(np.mean([s[key] for s in starts])) for key in starts[0] if key != "seed"}
 
     # Both objectives MINIMIZE and both are what EXAQC's Table 1 reports: accuracy
-    # (as its error, so lower is better) and a plain gate count. Accuracy is scored
-    # on VALIDATION, never test - EXAQC reports test accuracy but we only touch test
-    # once, at the end. Validation is 27 samples, so obj1 moves in steps of 1/27 and
-    # ties are expected; the cross-entropy rides along as a third value so we can see
-    # how much resolution we are giving up.
-    val_acc = accuracy(qc, xp, wp, w, X_va, y_va)
+    # (as its error, so lower is better) and a plain gate count. Accuracy is the
+    # average VALIDATION accuracy over the starts; the cross-entropy rides along as
+    # a third value.
+    val_acc, val_ce = avg["val_accuracy"], avg["val_cross_entropy"]
+    test_acc, test_ce = avg["test_accuracy"], avg["test_cross_entropy"]
     obj1 = 1.0 - val_acc
     obj2 = min(gate_count(qc), MAX_GATE_COST)
-    val_ce = cross_entropy(qc, xp, wp, w, X_va, y_va)
 
     if not np.isfinite(val_ce):
         raise ValueError(f"non-finite validation loss: {val_ce}")
@@ -253,12 +202,10 @@ def main():
     print(f"gene {args.gene_id}")
     print(f"  qubits {qc.num_qubits}  depth {qc.depth()}  params {len(wp)}")
     print(f"  obj1 val error {obj1:.4f} ({val_acc:.1%} acc)   obj2 gates {obj2:.0f}"
-          f"   [val cross-entropy {val_ce:.4f}, weighted cost {weighted_gate_cost(qc):.0f}]")
-    print(f"  train acc {accuracy(qc, xp, wp, w, X_tr, y_tr):.1%}"
-          f"   val acc {accuracy(qc, xp, wp, w, X_va, y_va):.1%}")
-
-    dead, rotations = count_dead_gates(qc, xp, wp, w)
-    print(f"  dead gates {dead}/{rotations} rotations at |angle| < 0.01")
+          f"   [val cross-entropy {val_ce:.4f}]")
+    print(f"  averaged over {n_starts} starts:   train acc {avg['train_accuracy']:.1%}"
+          f"   val acc {val_acc:.1%}   test acc {test_acc:.1%}")
+    print("  val acc per start: " + " ".join(f"{s['val_accuracy']:.1%}" for s in starts))
 
     # Every metric we might want to plot, so a Pareto front can be redrawn on any
     # pair afterwards without re-running anything. The harness never reads this
@@ -270,26 +217,24 @@ def main():
         "gene_id": args.gene_id,
         "obj1_val_error": obj1, "obj2_gates": obj2,
         "val_accuracy": val_acc, "val_cross_entropy": val_ce,
-        "train_accuracy": accuracy(qc, xp, wp, w, X_tr, y_tr),
-        "train_cross_entropy": cross_entropy(qc, xp, wp, w, X_tr, y_tr),
-        "gates": gate_count(qc), "weighted_gate_cost": weighted_gate_cost(qc),
+        "test_accuracy": test_acc, "test_cross_entropy": test_ce,
+        "train_accuracy": avg["train_accuracy"], "train_cross_entropy": avg["train_cross_entropy"],
+        "val_accuracy_sd": float(np.std([s["val_accuracy"] for s in starts])),
+        "gates": gate_count(qc),
         "two_qubit_gates": two_qubit, "depth": qc.depth(),
         "n_qubits": qc.num_qubits, "n_params": len(wp),
-        "train_passes": _PASSES, "train_evals": _PASSES / max(len(X_tr), 1),
-        "budget_evals": TRAIN_BUDGET_EVALS, "budget_spent": _PASSES >= (_PASS_LIMIT or 0),
-        "dead_rotations": dead, "rotations": rotations,
+        "n_starts": n_starts, "starts": starts,
+        "train_passes": max(s["train_passes"] for s in starts),      # per start, the most any used
+        "train_evals": max(s["train_passes"] for s in starts) / max(len(X_tr), 1),
+        "budget_evals": TRAIN_BUDGET_EVALS,
+        "budget_spent": any(s["train_passes"] >= _PASS_LIMIT for s in starts),
         "seconds": time.perf_counter() - t0,
     }
     mpath = os.path.join(args.out_dir, f"{args.gene_id}_metrics.json")
     with open(mpath, "w") as f:
         json.dump(metrics, f, indent=1, sort_keys=True)
     print(f"  metrics -> {mpath}   (used {metrics['train_evals']:.0f} of "
-          f"{TRAIN_BUDGET_EVALS} training evals)")
-
-    arms = tuple(a for a in args.repr.split(",") if a)
-    if arms:
-        for arm, rpath in emit_representations(qc, args.out_dir, args.gene_id, arms).items():
-            print(f"  repr [{arm}] -> {rpath}")
+          f"{TRAIN_BUDGET_EVALS} training evals per start)")
 
     print(f"  wrote {path}   ({time.perf_counter() - t0:.1f}s)")
 

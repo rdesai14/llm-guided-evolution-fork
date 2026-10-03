@@ -20,9 +20,8 @@ import sys
 import pathlib
 
 SEED_FILE = pathlib.Path(__file__).parent / "seed_vqc.py"
-MUST_BE_PROTECTED = ["load_data", "weighted_gate_cost", "forward", "cross_entropy",
-                     "accuracy", "write_results", "emit_representations",
-                     "count_dead_gates", "main"]
+MUST_BE_PROTECTED = ["load_data", "gate_count", "forward", "cross_entropy",
+                     "accuracy", "write_results", "main"]
 MUST_BE_EVOLVABLE = ["build_feature_map", "build_variational_layer", "build_entanglement",
                      "build_circuit", "readout_probabilities", "train_angles"]
 

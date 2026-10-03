@@ -47,8 +47,8 @@ except:
 
 #: Tuple of fitness weights of length equal to the number of objectives.
 #: 1.0 indicates objective will be maximized, -1.0 for objective to by minimized.
-# Both objectives MINIMIZE: obj1 = validation cross-entropy, obj2 = weighted
-# gate cost (two-qubit gates x5). The stock (1.0, -1.0) would MAXIMIZE obj1 and
+# Both objectives MINIMIZE: obj1 = 1 - validation accuracy averaged over 10
+# training starts, obj2 = gate count. The stock (1.0, -1.0) would MAXIMIZE obj1 and
 # drive the search toward worse circuits with nothing in the output to show it.
 FITNESS_WEIGHTS = (-1.0, -1.0)
 INVALID_FITNESS_MAX = tuple([float(x*np.inf*-1) for x in FITNESS_WEIGHTS])
@@ -73,7 +73,7 @@ start_population_size = 48
 #population_size = 44 # with cx_prob (0.25) and mute_prob (0.7) you get about %50 successful turnover
 
 #: Population size to utilize in each generation after optimization begins
-population_size = 16 # with cx_prob (0.25) and mute_prob (0.7) you get about %50 successful turnover
+population_size = 32 # must be a multiple of 4 for selTournamentDCD
 
 crossover_probability = 0.35  #: Probability of mating two individuals
 mutation_probability = 0.8 	  #: Probability of mutating an individual
