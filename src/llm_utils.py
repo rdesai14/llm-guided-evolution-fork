@@ -25,6 +25,57 @@ from google.genai import types
 
 
 
+def ensure_usable_gpus(max_hops=4):
+    """Run before loading the LLM: make sure this job's GPUs actually work.
+
+    Some coe-gpu nodes have GPUs that report "CUDA-capable device(s) is/are busy or
+    unavailable". A job that lands on one dies in ~20 s, which frees that GPU first,
+    so SLURM routes the next waiting job straight back to it - on Oct 3 2026 that
+    took 42 of 48 gen-0 LLM jobs on one node and 11 crossover jobs on another an
+    hour later. Which GPU is bad moves around, so a fixed --exclude list cannot keep
+    up. Instead, if the GPUs here are unusable, resubmit this same batch script
+    excluding this node, wait for it, and print its log here: the orchestrator only
+    ever reads slurm-<this job id>.out, so it sees the replacement's result as ours.
+    """
+    import subprocess, socket, torch
+    job_id = os.environ.get("SLURM_JOB_ID")
+    if not job_id:
+        return
+    try:
+        n = torch.cuda.device_count()
+        for i in range(n):
+            torch.zeros(1, device=f"cuda:{i}")
+        if n:
+            return
+        err = "no CUDA devices visible"
+    except RuntimeError as e:
+        err = str(e).splitlines()[0]
+
+    host = socket.gethostname().split(".")[0]
+    tried = [h for h in os.environ.get("LLM_BAD_GPU_NODES", "").split(",") if h] + [host]
+    print(f"GPU preflight failed on {host}: {err}", flush=True)
+    if len(tried) > max_hops:
+        raise RuntimeError(f"GPUs unusable on every node tried ({','.join(tried)}): {err}")
+
+    info = subprocess.run(["scontrol", "show", "job", job_id], capture_output=True, text=True).stdout
+    script = re.search(r"Command=(\S+)", info).group(1)
+    workdir = re.search(r"WorkDir=(\S+)", info).group(1)
+    # A command-line --exclude replaces the script's own #SBATCH --exclude, so merge them.
+    m = re.search(r"#SBATCH --exclude=(\S+)", open(script).read())
+    exclude = sorted(set((m.group(1).split(",") if m else []) + tried))
+    # Do not hand this job's GPU binding or SLURM state to the replacement.
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("SLURM_") and k not in ("CUDA_VISIBLE_DEVICES", "GPU_DEVICE_ORDINAL", "ROCR_VISIBLE_DEVICES")}
+    env["LLM_BAD_GPU_NODES"] = ",".join(tried)
+    r = subprocess.run(["sbatch", "--parsable", "--wait", f"--exclude={','.join(exclude)}", script],
+                       cwd=workdir, env=env, capture_output=True, text=True)
+    new_id = r.stdout.strip().split(";")[0]
+    print(f"Resubmitted as job {new_id} excluding {','.join(exclude)}; its log follows.", flush=True)
+    log = os.path.join(workdir, f"slurm-{new_id}.out")
+    print(open(log).read() if os.path.exists(log) else f"(no log for {new_id}: {r.stderr.strip()})", flush=True)
+    sys.exit(r.returncode)
+
+
 def retrieve_base_code(idx):
     """Retrieves base code for quality control."""
     base_network = SEED_NETWORK

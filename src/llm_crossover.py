@@ -93,6 +93,8 @@ def write_augmented_code(output_filename, parts_x, parts_y):
 
 
 if __name__ == "__main__":
+    from llm_utils import ensure_usable_gpus
+    ensure_usable_gpus()   # before anything else: a bad GPU resubmits this job elsewhere
     # Create the parser
     parser = argparse.ArgumentParser(description='Augment Python Network Script.')
 
