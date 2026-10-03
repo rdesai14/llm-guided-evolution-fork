@@ -144,6 +144,10 @@ LLM_BASH_SCRIPT_TEMPLATE = """#!/bin/bash
 #SBATCH --gres=gpu:2
 #SBATCH -G 2
 #SBATCH -C "{}"
+# These nodes report their GPUs as busy or unavailable: on Oct 3 2026, 47 of 48
+# gen-0 LLM jobs of run 6060968 died there with a CUDA error after loading the
+# model, and because they fail fast SLURM kept routing new jobs to them.
+#SBATCH --exclude=atl1-1-03-010-10-0,atl1-1-03-011-13-0,atl1-1-03-011-18-0
 #SBATCH --mem 128G
 #SBATCH -c 4
 echo "Launching: LLM Gene Operations"
