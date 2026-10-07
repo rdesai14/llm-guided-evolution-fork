@@ -206,7 +206,7 @@ export HF_HOME=/storage/ice-shared/vip-vvk/llm_storage/
 # Change to the repository root
 cd {constants.ROOT_DIR}
 
-uv run python islands_wrapper.py {constants.ISLAND_CONTROLLER_RUN_NAME} \\
+uv run python islands_wrapper.py {constants.OUTPUT_DIR} \\
     --num_islands {constants.ISLAND_CONTROLLER_NUM_ISLANDS} \\
     --llms {constants.ISLAND_CONTROLLER_LLMS} \\
     --prompt_groups "{constants.ISLAND_CONTROLLER_PROMPT_GROUPS}"

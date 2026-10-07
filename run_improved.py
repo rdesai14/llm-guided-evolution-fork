@@ -1045,7 +1045,7 @@ if __name__ == "__main__":
     # Add arguments
     parser.add_argument('--checkpoints', type=str, help='Save Dir')
     parser.add_argument('--llm_model', type=str, help='Which LLM to use', default=DEFAULT_LLM_MODEL)
-    parser.add_argument('--global_path', type=str, help='Path to global variables', default=ROOT_DIR)
+    parser.add_argument('--global_path', type=str, help='Path to global variables', default=OUTPUT_DIR)
     parser.add_argument('--prompt_group', type=str, help='Prompt group or glob (relative to templates/)', default=None)
     # Parse the arguments
     args = parser.parse_args()
@@ -1086,6 +1086,7 @@ if __name__ == "__main__":
     # Evolution
     for gen in range(start_gen, num_generations if migration_gen == 0 else ((start_gen + migration_gen - 1) // migration_gen) * migration_gen + 1):
         GEN_COUNT = gen
+        GENERATION = gen
         TOP_N_GENES = tools.selSPEA2(population, NUM_EOT_ELITES)
         box_print(f"STARTING GENERATION: {gen}", new_line_end=False)
         print_population(population, GLOBAL_DATA)

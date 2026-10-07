@@ -13,7 +13,7 @@ We recommend installing a tool called uv for Python package management. Instruct
 Once uv is installed, you can set up your Python environment from within your LLM-GE directory by running `uv sync --cache-dir ~/scratch/.uv`.
 
 > [!NOTE]
-> When running on PACE-ICE you have a limited quote in your home directory, which is why we specify using the cache folder on the scratch partition, where your quota is much larger
+> When running on PACE-ICE you have a limited quota in your home directory, which is why we specify using the cache folder on the scratch partition, where your quota is much larger
 
 ## Preparing Titanic Problem
 We don't want to check in data into our repository, so instead we check in scripts to pull the data. We have prepared a script to download the titanic dataset here, but you will have to first set up an API key with kaggle to utilize it. If you don't want to go through this, you can simply drop the train.csv file into sota/Titanic/data. Otherwise, please follow the instructions [Here](https://github.com/Kaggle/kaggle-api/blob/main/docs/README.md#api-credentials).
@@ -35,7 +35,7 @@ You can test this by running `uv run eval.py` to get out a false positive and fa
 ## Set Up LLM-GE
 By default, LLM-GE is set up to run to evolve an image classifier for the CIFAR-10 dataset. We will need to change the configurations to work with the Titanic problem, as well as prepare our evolution to run on pace-ice.
 
-Ensure that your settings are up to date in src/cfg/constants_titanic.py, and then constants.py is currently symlinked to it.
+Ensure that your settings are up to date in src/cfg/constants_titanic.py, and then constants.py is currently symlinked to it by running the collowing command from the src/cfg directory: `ln -sf constants_titanic.py constants.py`.
 
 You will then prepare your scripts by running `uv run slurm.py`. This will generate bash files that you can submit to slurm
 
