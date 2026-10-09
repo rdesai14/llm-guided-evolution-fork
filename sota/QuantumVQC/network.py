@@ -126,6 +126,16 @@ def accuracy(qc, xp, wp, w_vals, X, y):
     return correct / len(X)
 
 
+def soft_accuracy(qc, xp, wp, w_vals, X, y):
+    """Average probability on the true class, after the readout drops |11> and rescales.
+
+    accuracy() gives a flower full credit when its true class is the most likely one;
+    this gives it the probability itself, so 0.42 vs 0.40 earns 0.42, not 1. Recorded
+    in the metrics only (2026-10-08); selection still uses accuracy().
+    """
+    return float(np.mean([forward(qc, xp, wp, xi, w_vals)[yi] for xi, yi in zip(X, y)]))
+
+
 def write_results(out_dir, gene_id, obj1, obj2, extra=None):
     """run_improved.py reads the first two values; anything after is diagnostic."""
     os.makedirs(out_dir, exist_ok=True)
@@ -178,7 +188,9 @@ def main(n_starts=N_STARTS):
             "seed": SEED, "train_passes": _PASSES,
             "val_accuracy": accuracy(qc, xp, wp, w, X_va, y_va),
             "val_cross_entropy": cross_entropy(qc, xp, wp, w, X_va, y_va),
+            "val_soft_accuracy": soft_accuracy(qc, xp, wp, w, X_va, y_va),
             "test_accuracy": accuracy(qc, xp, wp, w, X_te, y_te),
+            "test_soft_accuracy": soft_accuracy(qc, xp, wp, w, X_te, y_te),
             "test_cross_entropy": cross_entropy(qc, xp, wp, w, X_te, y_te),
             "train_accuracy": accuracy(qc, xp, wp, w, X_tr, y_tr),
             "train_cross_entropy": cross_entropy(qc, xp, wp, w, X_tr, y_tr),
@@ -204,7 +216,8 @@ def main(n_starts=N_STARTS):
     print(f"  obj1 val error {obj1:.4f} ({val_acc:.1%} acc)   obj2 gates {obj2:.0f}"
           f"   [val cross-entropy {val_ce:.4f}]")
     print(f"  averaged over {n_starts} starts:   train acc {avg['train_accuracy']:.1%}"
-          f"   val acc {val_acc:.1%}   test acc {test_acc:.1%}")
+          f"   val acc {val_acc:.1%}   test acc {test_acc:.1%}"
+          f"   val soft acc {avg['val_soft_accuracy']:.1%}")
     print("  val acc per start: " + " ".join(f"{s['val_accuracy']:.1%}" for s in starts))
 
     # Every metric we might want to plot, so a Pareto front can be redrawn on any
@@ -218,6 +231,7 @@ def main(n_starts=N_STARTS):
         "obj1_val_error": obj1, "obj2_gates": obj2,
         "val_accuracy": val_acc, "val_cross_entropy": val_ce,
         "test_accuracy": test_acc, "test_cross_entropy": test_ce,
+        "val_soft_accuracy": avg["val_soft_accuracy"], "test_soft_accuracy": avg["test_soft_accuracy"],
         "train_accuracy": avg["train_accuracy"], "train_cross_entropy": avg["train_cross_entropy"],
         "val_accuracy_sd": float(np.std([s["val_accuracy"] for s in starts])),
         "gates": gate_count(qc),
