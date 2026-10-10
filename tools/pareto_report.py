@@ -14,7 +14,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 
-SEED_OBJ = (0.14814814814814814, 28.0)   # the seed on PACE: val error 0.1481, 28 gates
+SEED_OBJ = (0.10999999999999999, 28.0)   # seed on PACE, Moses branch, Python 3.12 (job 6150551)
 TEAL, PURPLE, LTEAL, GRAY = "#418faf", "#4c4a86", "#7fc5d4", "#9ba0a5"
 NAVY, MUTED, ACC = "#2d2a54", "#6e6f7b", "#b5504a"
 
