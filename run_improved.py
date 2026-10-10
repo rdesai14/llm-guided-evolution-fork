@@ -536,15 +536,24 @@ def check4results(gene_id):
         # The job saves the model results to a file f'{gene_id}_results.csv'
         # results_path = os.path.join(out_dir, f'{gene_id}_results.csv')
         results_path = f'{SOTA_ROOT}/results/{gene_id}_results.csv'
-        with open(results_path, 'r') as file:
-            lines = file.readlines()
-        # Skip header line (first line) and parse data line (second line)
-        results = lines[-1].strip() if len(lines) > 1 else lines[0].strip()
-        results = results.split(',')
-        fitness = [float(r.strip()) for r in results]
-        # TODO: get all features later
-        fitness = [fitness[i] for i in range(len(FITNESS_WEIGHTS))]
-        fitness = tuple(fitness)
+        # A job can exit cleanly and still write no usable results - the LLM is free
+        # to rewrite main() into something that never writes them, and the eval
+        # script prints the completion sentinel regardless. That is a dead
+        # individual, not a crash: without this guard one such gene takes the whole
+        # orchestrator down with FileNotFoundError mid-generation (run 5866829).
+        try:
+            with open(results_path, 'r') as file:
+                lines = file.readlines()
+            # Skip header line (first line) and parse data line (second line)
+            results = lines[-1].strip() if len(lines) > 1 else lines[0].strip()
+            results = results.split(',')
+            fitness = [float(r.strip()) for r in results]
+            # TODO: get all features later
+            fitness = [fitness[i] for i in range(len(FITNESS_WEIGHTS))]
+            fitness = tuple(fitness)
+        except (OSError, ValueError, IndexError) as e:
+            print(f'\t☠ No usable results for {gene_id}: {type(e).__name__} - {e}', flush=True)
+            fitness = INVALID_FITNESS_MAX
         
         GLOBAL_DATA[gene_id]['status'] = 'completed'
         GLOBAL_DATA[gene_id]['fitness'] = fitness

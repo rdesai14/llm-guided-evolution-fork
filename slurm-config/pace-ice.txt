@@ -2,6 +2,9 @@ run.sh
 ------
 #!/bin/bash
 #SBATCH --job-name=llm_opt
+#SBATCH -A coc
+#SBATCH -q coe-ice
+#SBATCH -p pace-cpu
 #SBATCH -t 8:00:00
 #SBATCH --mem 16G
 #SBATCH -c 4
@@ -32,6 +35,10 @@ python-bash-script
 ------
 #!/bin/bash
 #SBATCH --job-name=evaluateGene
+#SBATCH -A coc
+#SBATCH -q coe-ice
+#SBATCH -p coe-gpu
+#SBATCH -C "H100"
 #SBATCH -t 4:00:00
 #SBATCH --gres=gpu:1
 #SBATCH -G 1
@@ -46,6 +53,9 @@ llm-bash-script
 ------
 #!/bin/bash
 #SBATCH --job-name=llm_oper
+#SBATCH -A coc
+#SBATCH -q coe-ice
+#SBATCH -p pace-cpu
 #SBATCH -t 8:00:00
 #SBATCH --mem 16G
 #SBATCH -c 2
@@ -58,7 +68,11 @@ server-sh
 ------
 #!/bin/bash
 #SBATCH --job-name=LLMGE01_Server
-#SBATCH -t 8:00:00
+#SBATCH -A coc
+#SBATCH -q coe-ice
+#SBATCH -p coe-gpu
+#SBATCH -t 16:00:00
+#SBATCH --exclude=atl1-1-03-010-10-0,atl1-1-03-011-13-0,atl1-1-03-011-18-0
 #SBATCH --nodes=1
 #SBATCH -G 2
 #SBATCH -C "H200"
@@ -72,12 +86,13 @@ islands
 ------
 #!/bin/bash
 #SBATCH --job-name=Islands_script
+#SBATCH -A coc
+#SBATCH -q coe-ice
+#SBATCH -p pace-cpu
 #SBATCH -N1 --ntasks-per-node=16
 #SBATCH --mem=16G
-#SBATCH --time=8:00:00
+#SBATCH --time=16:00:00
 #SBATCH --output=run_job_outputs/islands/Report_islands-%j.out
-#SBATCH --gres=gpu:1
-#SBATCH -C intel
 ------
 
 
@@ -85,9 +100,11 @@ island-controller
 ------
 #!/bin/bash
 #SBATCH --job-name=Island_controller
+#SBATCH -A coc
+#SBATCH -q coe-ice
+#SBATCH -p pace-cpu
 #SBATCH -N1 --ntasks-per-node=4
 #SBATCH --mem=16G
-#SBATCH --time=8:00:00
+#SBATCH --time=16:00:00
 #SBATCH --output=run_job_outputs/islands/Report_island_controller-%j.out
-#SBATCH -C intel
 ------
