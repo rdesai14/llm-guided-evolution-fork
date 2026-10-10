@@ -285,6 +285,24 @@ def wait_for_llm_server(timeout=3600, check_interval=10):
         print(f"\t‣ Last readiness error: {last_error}", flush=True)
     return False
 
+def run_submit(file_path, max_wait=3600, check_interval=60):
+    """Submit file_path, waiting out the per-user job cap instead of failing.
+
+    PACE allows 50 queued+running jobs per user and this run holds 3 of them
+    (server, controller, island), so a full generation of LLM jobs can hit
+    QOSMaxSubmitJobPerUserLimit. Rejected LLM jobs used to drop the individual;
+    rejected eval jobs sat as 'running eval' with no job id until the 40-minute
+    no-progress timeout. A slot frees as soon as any running job finishes.
+    """
+    waited = 0
+    while True:
+        result = subprocess.run([RUN_COMMAND, file_path], capture_output=True, text=True)
+        if result.returncode == 0 or "QOSMaxSubmitJobPerUserLimit" not in result.stderr or waited >= max_wait:
+            return result
+        print(f"\t‣ At the per-user job cap, retrying in {check_interval}s ({waited}s waited)", flush=True)
+        time.sleep(check_interval)
+        waited += check_interval
+
 def submit_bash(file_path, **kwargs):
     """ This should be general for subbing anything and returning:
         successful_sub_flag 
@@ -294,7 +312,7 @@ def submit_bash(file_path, **kwargs):
         return False, None, None
 
     create_bash_file(file_path, **kwargs)
-    result = subprocess.run([RUN_COMMAND, file_path], capture_output=True, text=True)
+    result = run_submit(file_path)
     local_output = None
     if result.returncode == 0 and LOCAL:
         local_output = result.stdout.strip()
@@ -453,7 +471,7 @@ def submit_run(gene_id):
         job_id = None
         successful_sub_flag = False
         local_output = None
-        result = subprocess.run([RUN_COMMAND, file_path], capture_output=True, text=True)
+        result = run_submit(file_path)
         if LOCAL:
             local_output = result.stdout.strip() + '\n' + result.stderr.strip()
             print("\t‣ Output:", local_output, flush=True)
