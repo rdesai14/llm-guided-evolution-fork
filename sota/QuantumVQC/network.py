@@ -17,8 +17,8 @@ A crash, an invalid circuit, or a missing file leaves the harness to assign
 INVALID_FITNESS_MAX, which is the intended failure path - do not catch broadly
 and report a fake score.
 
-Fitness is computed on VALIDATION. Every circuit is also scored on test right after
-training, like ExquisiteNetV2 does, but test only goes into <gene>_metrics.json.
+Fitness is computed on VALIDATION. The test flowers are not touched here at all: they
+are used once, after a run, by final_eval.py on the circuits the run selected.
 """
 
 import argparse
@@ -83,7 +83,7 @@ def gate_count(qc):
 # more steps, not more compute.
 TRAIN_BUDGET_EVALS = 178        # full passes over the training set, measured in §5
 _PASSES = 0                     # forward() calls made while training
-_PASS_LIMIT = None              # set in main() once the training set size is known
+_PASS_LIMIT = None              # set in train_starts() once the training set size is known
 _COUNTING = False               # only training counts, scoring afterwards does not
 _BEST = [float("inf"), None]    # best (training loss, weights) seen while training
 N_STARTS = 10                   # trainings per individual from different starting angles; obj1 averages them
@@ -145,29 +145,18 @@ def write_results(out_dir, gene_id, obj1, obj2, extra=None):
     return path
 
 
-def main(n_starts=N_STARTS):
-    # n_starts is bound here, when the protected header runs, so a block that
-    # rebinds N_STARTS cannot change how many times an individual is trained.
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--gene-id", default="seed")
-    ap.add_argument("--out-dir", default="results")
-    args = ap.parse_args()
+def train_starts(qc, xp, wp, X_tr, y_tr, n_starts=N_STARTS):
+    """Train the circuit n_starts times, from starting angles SEED, SEED+1, ...
 
-    t0 = time.perf_counter()
-    X_tr, X_va, X_te, y_tr, y_va, y_te = load_data()
-
-    qc, xp, wp = build_circuit()
-    if len(wp) == 0:
-        raise ValueError("circuit has no trainable parameters")
-
-    # Multi-start (2026-10-03). One training run is a lottery: the seed alone scored
-    # 76.7-93.3% validation over 20 starting points, so a single-start "win" over it
-    # meant nothing. Every circuit is now trained N_STARTS times from different
-    # starting angles (SEED, SEED+1, ...), each with the full training budget, and
-    # every score below is the average over the starts.
+    Each training gets the full budget, and an individual that runs out of budget
+    keeps its best angles. Returns [(seed, passes used, trained weights)]. main() and
+    final_eval.py both train through this, so the final test score comes from exactly
+    the training that selection saw. n_starts is bound when the protected header
+    runs, so a block that rebinds N_STARTS cannot change it.
+    """
     global _COUNTING, _PASS_LIMIT, _PASSES, SEED
     _PASS_LIMIT = TRAIN_BUDGET_EVALS * len(X_tr)
-    base_seed, starts = SEED, []
+    base_seed, runs = SEED, []
     for k in range(n_starts):
         SEED = base_seed + k               # train_angles reads SEED for its starting angles
         _PASSES = 0
@@ -181,21 +170,39 @@ def main(n_starts=N_STARTS):
             w = _BEST[1]
         finally:
             _COUNTING = False
-        # Every circuit is also scored on test as soon as it is trained, the way
-        # ExquisiteNetV2's train.py scores every individual (2026-10-01). Test is
-        # recorded in the metrics file only; selection reads validation.
-        starts.append({
-            "seed": SEED, "train_passes": _PASSES,
-            "val_accuracy": accuracy(qc, xp, wp, w, X_va, y_va),
-            "val_cross_entropy": cross_entropy(qc, xp, wp, w, X_va, y_va),
-            "val_soft_accuracy": soft_accuracy(qc, xp, wp, w, X_va, y_va),
-            "test_accuracy": accuracy(qc, xp, wp, w, X_te, y_te),
-            "test_soft_accuracy": soft_accuracy(qc, xp, wp, w, X_te, y_te),
-            "test_cross_entropy": cross_entropy(qc, xp, wp, w, X_te, y_te),
-            "train_accuracy": accuracy(qc, xp, wp, w, X_tr, y_tr),
-            "train_cross_entropy": cross_entropy(qc, xp, wp, w, X_tr, y_tr),
-        })
+        runs.append((SEED, _PASSES, w))
     SEED = base_seed
+    return runs
+
+
+def main(n_starts=N_STARTS):
+    # n_starts is bound here, when the protected header runs, so a block that
+    # rebinds N_STARTS cannot change how many times an individual is trained.
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--gene-id", default="seed")
+    ap.add_argument("--out-dir", default="results")
+    args = ap.parse_args()
+
+    t0 = time.perf_counter()
+    X_tr, X_va, _, y_tr, y_va, _ = load_data()     # test is left for final_eval.py
+
+    qc, xp, wp = build_circuit()
+    if len(wp) == 0:
+        raise ValueError("circuit has no trainable parameters")
+
+    # Multi-start (2026-10-03). One training run is a lottery: the seed alone scored
+    # 76.7-93.3% validation over 20 starting points, so a single-start "win" over it
+    # meant nothing. Every circuit is now trained N_STARTS times from different
+    # starting angles (SEED, SEED+1, ...), each with the full training budget, and
+    # every score below is the average over the starts.
+    starts = [{
+        "seed": seed, "train_passes": passes,
+        "val_accuracy": accuracy(qc, xp, wp, w, X_va, y_va),
+        "val_cross_entropy": cross_entropy(qc, xp, wp, w, X_va, y_va),
+        "val_soft_accuracy": soft_accuracy(qc, xp, wp, w, X_va, y_va),
+        "train_accuracy": accuracy(qc, xp, wp, w, X_tr, y_tr),
+        "train_cross_entropy": cross_entropy(qc, xp, wp, w, X_tr, y_tr),
+    } for seed, passes, w in train_starts(qc, xp, wp, X_tr, y_tr, n_starts)]
     avg = {key: float(np.mean([s[key] for s in starts])) for key in starts[0] if key != "seed"}
 
     # Both objectives MINIMIZE and both are what EXAQC's Table 1 reports: accuracy
@@ -203,7 +210,6 @@ def main(n_starts=N_STARTS):
     # average VALIDATION accuracy over the starts; the cross-entropy rides along as
     # a third value.
     val_acc, val_ce = avg["val_accuracy"], avg["val_cross_entropy"]
-    test_acc, test_ce = avg["test_accuracy"], avg["test_cross_entropy"]
     obj1 = 1.0 - val_acc
     obj2 = min(gate_count(qc), MAX_GATE_COST)
 
@@ -216,7 +222,7 @@ def main(n_starts=N_STARTS):
     print(f"  obj1 val error {obj1:.4f} ({val_acc:.1%} acc)   obj2 gates {obj2:.0f}"
           f"   [val cross-entropy {val_ce:.4f}]")
     print(f"  averaged over {n_starts} starts:   train acc {avg['train_accuracy']:.1%}"
-          f"   val acc {val_acc:.1%}   test acc {test_acc:.1%}"
+          f"   val acc {val_acc:.1%}"
           f"   val soft acc {avg['val_soft_accuracy']:.1%}")
     print("  val acc per start: " + " ".join(f"{s['val_accuracy']:.1%}" for s in starts))
 
@@ -230,8 +236,7 @@ def main(n_starts=N_STARTS):
         "gene_id": args.gene_id,
         "obj1_val_error": obj1, "obj2_gates": obj2,
         "val_accuracy": val_acc, "val_cross_entropy": val_ce,
-        "test_accuracy": test_acc, "test_cross_entropy": test_ce,
-        "val_soft_accuracy": avg["val_soft_accuracy"], "test_soft_accuracy": avg["test_soft_accuracy"],
+        "val_soft_accuracy": avg["val_soft_accuracy"],
         "train_accuracy": avg["train_accuracy"], "train_cross_entropy": avg["train_cross_entropy"],
         "val_accuracy_sd": float(np.std([s["val_accuracy"] for s in starts])),
         "gates": gate_count(qc),
