@@ -56,7 +56,7 @@ llm-bash-script
 #SBATCH -A coc
 #SBATCH -q coe-ice
 #SBATCH -p pace-cpu
-#SBATCH -t 8:00:00
+#SBATCH -t 8:00:00              # 2 GPUs x 16h trips QOSMaxGRESMinutesPerJob; chain with sbatch server.sh <count>
 #SBATCH --mem 16G
 #SBATCH -c 2
 #SBATCH -N 1
@@ -71,7 +71,7 @@ server-sh
 #SBATCH -A coc
 #SBATCH -q coe-ice
 #SBATCH -p coe-gpu
-#SBATCH -t 16:00:00
+#SBATCH -t 8:00:00
 #SBATCH --exclude=atl1-1-03-010-10-0,atl1-1-03-011-13-0,atl1-1-03-011-18-0
 #SBATCH --nodes=1
 #SBATCH -G 2
