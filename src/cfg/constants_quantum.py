@@ -138,7 +138,11 @@ start_population_size = 48  # Starting population size
 population_size = 32 # must be a multiple of 4 for selTournamentDCD
 crossover_probability = 0.35  # Probability of mating two individuals
 mutation_probability = 0.8 # Probability of mutating an individual
-num_elites = 44  # value the new_main quantum runs used
+# Moses's generation loop discards the WHOLE population and rebuilds it from the
+# seed whenever fewer than num_elites individuals are valid (new_main had no such
+# loop). At 44, run 6150563 got 15/48 valid in gen 0 and rebuilt for 16 hours
+# without reaching generation 2. Keep this below the typical valid count.
+num_elites = 8
 hof_size = 100
 max_gen_attempts = 5
 migration_gen = 0  # no migration: single population (see ISLAND_CONTROLLER_*)

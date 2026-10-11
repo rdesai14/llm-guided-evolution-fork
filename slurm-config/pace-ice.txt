@@ -91,7 +91,7 @@ islands
 #SBATCH -p pace-cpu
 #SBATCH -N1 --ntasks-per-node=16
 #SBATCH --mem=16G
-#SBATCH --time=16:00:00
+#SBATCH --time=8:00:00
 #SBATCH --output=run_job_outputs/islands/Report_islands-%j.out
 ------
 
@@ -105,6 +105,6 @@ island-controller
 #SBATCH -p pace-cpu
 #SBATCH -N1 --ntasks-per-node=4
 #SBATCH --mem=16G
-#SBATCH --time=16:00:00
+#SBATCH --time=8:00:00
 #SBATCH --output=run_job_outputs/islands/Report_island_controller-%j.out
 ------
