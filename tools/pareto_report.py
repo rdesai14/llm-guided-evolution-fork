@@ -46,7 +46,7 @@ def load_metric_pair(results_dir, xk, yk):
     return out
 
 
-def load_generations(log_path):
+def load_generations(log_path, offset=0):
     """Generation each gene id is first mentioned in, and whether this run resumed.
 
     The resume flag matters: on a resumed run the orchestrator restores a
@@ -64,7 +64,9 @@ def load_generations(log_path):
             resumed = True
         m = re.search(r"STARTING GENERATION:\s*(\d+)", line)
         if m:
-            gen = int(m.group(1)) + 1            # pop created before gen 0 => 0
+            # Moses counts generations from 1 (start_gen = 1), so its banner number is
+            # already the generation; new_main counted from 0 and needs offset 1.
+            gen = int(m.group(1)) + offset       # pop created before the first banner => 0
             continue
         for gid in re.findall(r"xXx[A-Za-z0-9]+", line):
             gen_of.setdefault(gid, gen)
@@ -85,6 +87,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", required=True)
     ap.add_argument("--log", default=None)
+    ap.add_argument("--gen-offset", type=int, default=0,
+                    help="added to each STARTING GENERATION number: 0 for MosesTheRedSea-main "
+                         "logs (loop starts at 1), 1 for new_main logs (loop starts at 0)")
     ap.add_argument("--out", default="pareto_out")
     ap.add_argument("--strict", action="store_true",
                     help="on a resumed run, drop genes missing from this log "
@@ -112,7 +117,7 @@ def main():
         XLAB, YLAB = "obj1  —  validation error (1 - accuracy)", "obj2  —  gate count"
     if not fit:
         print("no parsable results yet"); return
-    gen_of, resumed = load_generations(a.log)
+    gen_of, resumed = load_generations(a.log, a.gen_offset)
     # results/ is never cleared between runs, so it accumulates genes from every
     # previous (often crashed) run. Those are absent from THIS run's log, and
     # gen_of.get(g, 0) would silently relabel them as generation 0 and let them

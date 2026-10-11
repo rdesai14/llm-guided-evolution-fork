@@ -11,6 +11,8 @@ SEED_PNG = os.path.join(ROOT, "sota/QuantumVQC/results")
 
 
 def _find_a_circuit_png():
+    if not os.path.isdir(SEED_PNG):       # fresh checkout: no seed run yet
+        return None
     for f in sorted(os.listdir(SEED_PNG)):
         if f.endswith("_circuit.png"):
             return os.path.join(SEED_PNG, f)
@@ -78,5 +80,17 @@ with tempfile.TemporaryDirectory() as tmp:
             assert h < 6000, f"capped grid still {h}px tall"
     else:
         print("  (skipped cap render check - no circuit PNG available to copy)")
+
+# 3. generation labels: a Moses log starts at "STARTING GENERATION: 1", and genes
+#    first named after that banner were produced in generation 1, not 2.
+sys.path.insert(0, os.path.dirname(REPORT))
+from pareto_report import load_generations
+with tempfile.TemporaryDirectory() as tmp:
+    log = os.path.join(tmp, "moses.out")
+    open(log, "w").write(f"Gene: {G[0]}\nSTARTING GENERATION: 1\nGene: {G[1]}\nSTARTING GENERATION: 2\nGene: {G[2]}\n")
+    gen_of, _ = load_generations(log)
+    assert (gen_of[G[0]], gen_of[G[1]], gen_of[G[2]]) == (0, 1, 2), gen_of
+    gen_of, _ = load_generations(log, offset=1)      # new_main convention
+    assert gen_of[G[1]] == 2, gen_of
 
 print("all pareto_report checks passed")
