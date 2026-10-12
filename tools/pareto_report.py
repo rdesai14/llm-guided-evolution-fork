@@ -33,6 +33,19 @@ def load_fitness(results_dir):
     return out
 
 
+def load_seed_point(path, xk="obj1_val_error", yk="obj2_gates"):
+    """The seed's (xk, yk) from its metrics file, or None if it has no such file.
+
+    Moses never evaluates the seed itself, so a run's results/ has no seed entry;
+    point --seed-metrics at a seed_metrics.json from a standalone seed run.
+    """
+    try:
+        m = json.load(open(path))
+        return (float(m[xk]), float(m[yk]))
+    except Exception:
+        return None
+
+
 def load_metric_pair(results_dir, xk, yk):
     """Any two measures from <gene>_metrics.json. BOTH are treated as minimised."""
     out = {}
@@ -100,21 +113,25 @@ def main():
                          "Both axes are treated as lower-is-better, so do not pass an "
                          "accuracy field - use val_error.")
     ap.add_argument("--y", default=None)
+    ap.add_argument("--seed-metrics", default=None,
+                    help="seed_metrics.json to plot the seed from; default <results>/seed_metrics.json")
     ap.add_argument("--max-circuits", type=int, default=40,
                     help="cap rows in the circuit grid (front members first)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
 
     global SEED_OBJ
+    seed_path = a.seed_metrics or os.path.join(a.results, "seed_metrics.json")
     if bool(a.x) != bool(a.y):
         print("--x and --y must be given together"); return
     if a.x:
         fit = load_metric_pair(a.results, a.x, a.y)
-        SEED_OBJ = None            # the recorded seed point only applies to the objectives
+        SEED_OBJ = load_seed_point(seed_path, a.x, a.y)   # None if there is no seed file
         XLAB, YLAB = a.x, a.y
     else:
         fit = load_fitness(a.results)
-        XLAB, YLAB = "obj1  —  validation error (1 - accuracy)", "obj2  —  gate count"
+        SEED_OBJ = load_seed_point(seed_path) or SEED_OBJ
+        XLAB, YLAB = "obj1  —  validation error (1 - top-1 accuracy)", "obj2  —  gate count"
     if not fit:
         print("no parsable results yet"); return
     gen_of, resumed = load_generations(a.log, a.gen_offset)

@@ -93,4 +93,17 @@ with tempfile.TemporaryDirectory() as tmp:
     gen_of, _ = load_generations(log, offset=1)      # new_main convention
     assert gen_of[G[1]] == 2, gen_of
 
+# 4. the seed point comes from its metrics file, for any metric pair
+from pareto_report import load_seed_point
+with tempfile.TemporaryDirectory() as tmp:
+    sp = os.path.join(tmp, "seed_metrics.json")
+    open(sp, "w").write('{"obj1_val_error": 0.11, "obj2_gates": 28, "val_cross_entropy": 0.498, "gates": 28}')
+    assert load_seed_point(sp) == (0.11, 28.0)
+    assert load_seed_point(sp, "gates", "val_cross_entropy") == (28.0, 0.498)
+    assert load_seed_point(os.path.join(tmp, "missing.json")) is None
+    assert load_seed_point(sp, "depth", "gates") is None            # key absent
+    res, log = build(tmp, G[:3], G[:3], resumed=False)
+    o = run(res, log, os.path.join(tmp, "o4"), "--x", "gates", "--y", "val_cross_entropy", "--seed-metrics", sp)
+    assert "evaluated individuals" in o or "no parsable" in o, o
+
 print("all pareto_report checks passed")
