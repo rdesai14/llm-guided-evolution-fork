@@ -131,7 +131,7 @@ NUM_EOT_ELITES = 10
 GENERATION = 0
 PROB_QC = 0.0
 PROB_EOT = 0.25
-num_generations = 40 # Number of generations
+num_generations = 70 # Number of generations
 start_population_size = 48  # Starting population size
 # start_population_size = 144   # Size of the population 124=72
 #population_size = 44 # with cx_prob (0.25) and mute_prob (0.7) you get about %50 successful turnover
@@ -143,6 +143,19 @@ mutation_probability = 0.8 # Probability of mutating an individual
 # loop). At 44, run 6150563 got 15/48 valid in gen 0 and rebuilt for 16 hours
 # without reaching generation 2. Keep this below the typical valid count.
 num_elites = 8
+# Qiskit RAG (from Aadharsh's qiskit-llmge branch): the LLM job appends BM25-retrieved
+# Qiskit notes for the block it edits, the block's contract, and the errors recent
+# children of that block died with. LLMGE_QISKIT_RAG=1 turns it on.
+QISKIT_RAG = os.getenv("LLMGE_QISKIT_RAG", "0") == "1"
+# Quality diversity (from Deshna's quantum-seeds-qd branch): MAP-Elites parent selection
+# instead of NSGA-II. LLMGE_QD_MODE=1 turns it on; LLMGE_QD_DEDUP=1 also skips training
+# circuits that behave exactly like one already scored this run (QD_MODE only).
+QD_MODE = os.getenv("LLMGE_QD_MODE", "0") == "1"
+QD_DEDUP = os.getenv("LLMGE_QD_DEDUP", "0") == "1"
+QD_GRID_SIZE = 6
+# (lo, hi) bin range per archive axis; values outside are clamped to the edge bins
+QD_NONLOCAL_GATE_RANGE = (0, 24)
+QD_DEPTH_RANGE = (0, 24)
 hof_size = 100
 max_gen_attempts = 5
 migration_gen = 0  # no migration: single population (see ISLAND_CONTROLLER_*)

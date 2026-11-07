@@ -22,6 +22,8 @@ training, like ExquisiteNetV2 does, but test only goes into <gene>_metrics.json.
 """
 
 import argparse
+import ast
+import hashlib
 import json
 import os
 import sys
@@ -145,7 +147,27 @@ def write_results(out_dir, gene_id, obj1, obj2, extra=None):
     return path
 
 
-def main(n_starts=N_STARTS):
+def fingerprint(qc, xp, wp, X):
+    """What this individual does, as a hash, for QD_DEDUP (Deshna's quantum-seeds-qd branch).
+
+    Class probabilities on 24 training flowers at two fixed random angle sets, the gate
+    count (obj2), and the training block's code without comments. Two circuits with the
+    same hash get the same score, so a repeat does not need training again.
+    """
+    h = hashlib.md5()
+    for s in (7, 11):
+        w = np.random.default_rng(s).uniform(0, 2 * np.pi, len(wp))
+        h.update(np.round([forward(qc, xp, wp, xi, w) for xi in X[:24]], 4).tobytes())
+    h.update(str(gate_count(qc)).encode())
+    training_block = open(__file__).read().split("# --" "OPTION--")[-1]  # written in two halves: the whole marker here would split the file
+    try:
+        h.update(ast.dump(ast.parse(training_block)).encode())
+    except SyntaxError:
+        h.update(training_block.encode())
+    return h.hexdigest()
+
+
+def main(n_starts=N_STARTS, fingerprint=fingerprint):
     # n_starts is bound here, when the protected header runs, so a block that
     # rebinds N_STARTS cannot change how many times an individual is trained.
     ap = argparse.ArgumentParser()
@@ -159,6 +181,18 @@ def main(n_starts=N_STARTS):
     qc, xp, wp = build_circuit()
     if len(wp) == 0:
         raise ValueError("circuit has no trainable parameters")
+
+    # QD_DEDUP: run_improved.py lists the fingerprints of every circuit already scored this
+    # run. One that behaves the same is not trained again and gets the worst score.
+    seen_path = os.environ.get("LLMGE_SEEN_FINGERPRINTS")
+    fp = fingerprint(qc, xp, wp, X_tr) if seen_path else None
+    if fp is not None and os.path.exists(seen_path) and fp in open(seen_path).read().split():
+        write_results(args.out_dir, args.gene_id, float("inf"), float("inf"))
+        with open(os.path.join(args.out_dir, f"{args.gene_id}_metrics.json"), "w") as f:
+            json.dump({"gene_id": args.gene_id, "duplicate": True, "fingerprint": fp,
+                       "gates": gate_count(qc)}, f, indent=1, sort_keys=True)
+        print(f"gene {args.gene_id}: behaves like a circuit already scored this run, not trained")
+        return
 
     # Multi-start (2026-10-03). One training run is a lottery: the seed alone scored
     # 76.7-93.3% validation over 20 starting points, so a single-start "win" over it
@@ -244,6 +278,8 @@ def main(n_starts=N_STARTS):
         "budget_spent": any(s["train_passes"] >= _PASS_LIMIT for s in starts),
         "seconds": time.perf_counter() - t0,
     }
+    if fp is not None:
+        metrics["fingerprint"] = fp
     mpath = os.path.join(args.out_dir, f"{args.gene_id}_metrics.json")
     with open(mpath, "w") as f:
         json.dump(metrics, f, indent=1, sort_keys=True)

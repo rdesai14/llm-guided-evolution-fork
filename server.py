@@ -13,8 +13,10 @@ import transformers
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from src.cfg.constants import *
+from src.vlm_utils import CIRCUIT_VIEW, VLM_PROMPT, VLM_MAX_NEW_TOKENS, GemmaCritic
 
 app = FastAPI(title="LLM API", version="1.0")
+VLM = None  # Gemma critic, loaded at startup only when LLMGE_CIRCUIT_VIEW=gemma
 
 BATCH_SIZE = 8  # num of LLM requests to process at once
 BATCH_WAIT_TIME = 2  # max wait time for batch to fill in s
@@ -24,6 +26,11 @@ class LLMRequest(BaseModel):
     max_new_tokens: int = LLM_MAX_NEW_TOKENS
     top_p: float = 0.8
     temperature: float = 0.7
+
+class CritiqueRequest(BaseModel):
+    image_path: str  # a PNG on the shared filesystem
+    prompt: str = VLM_PROMPT
+    max_new_tokens: int = VLM_MAX_NEW_TOKENS
 
 class LLMModel:
     _instance = None
@@ -293,6 +300,19 @@ async def generate_text(request: LLMRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/critique")
+async def critique_image(request: CritiqueRequest):
+    """Gemma's notes on a circuit drawing (H2). 503 when the VLM is not loaded."""
+    if VLM is None:
+        raise HTTPException(status_code=503, detail="VLM not loaded; sbatch server.sh with LLMGE_CIRCUIT_VIEW=gemma")
+    start_time = time.time()
+    try:
+        text = await asyncio.to_thread(VLM.critique, request.image_path, request.prompt, request.max_new_tokens)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    print(f"Critique done in {time.time() - start_time:.2f}s", flush=True)
+    return {"generated_text": text, "response_time_sec": round(time.time() - start_time, 2)}
+
 @app.get("/")
 async def root():
     return {"message": "LLM API is running!"}
@@ -305,3 +325,9 @@ async def preload_model():
     """Load the model at process start so first request is fast."""
     model = LLMModel()
     await model.start_batch_processor()
+    global VLM
+    if CIRCUIT_VIEW == "gemma":
+        try:
+            VLM = await asyncio.to_thread(GemmaCritic)
+        except Exception as e:  # keep serving Llama even if the VLM can't load
+            print(f"VLM failed to load, /critique disabled: {e}", flush=True)

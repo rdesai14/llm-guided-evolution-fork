@@ -63,3 +63,6 @@ island_controller.sbatch
 templates/**/mutant*.sh
 src/mixt.sh 
 hostname.log
+
+# drawings and Gemma notes cached per parent by src/vlm_utils.py
+sota/QuantumVQC/renders/

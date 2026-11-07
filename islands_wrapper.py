@@ -110,6 +110,9 @@ def check4job_completion(job_id, local_output=None, check_interval=60, timeout=3
             with open(output_file, 'r') as file:
                 contents = file.read()
                 state = check_contents_for_error(contents)
+                if state is None and f"*** JOB {job_id} ON" in contents:  # Slurm ended the island (time limit or scancel)
+                    print("\t☠ Island job was cancelled by Slurm.", flush=True)
+                    state = False
                 if state is None:
                     pass
                 else:
