@@ -131,7 +131,7 @@ NUM_EOT_ELITES = 10
 GENERATION = 0
 PROB_QC = 0.0
 PROB_EOT = 0.25
-num_generations = 70 # Number of generations
+num_generations = 35 # Number of generations (Nov 2026 experiment: every trial runs 35)
 start_population_size = 48  # Starting population size
 # start_population_size = 144   # Size of the population 124=72
 #population_size = 44 # with cx_prob (0.25) and mute_prob (0.7) you get about %50 successful turnover
