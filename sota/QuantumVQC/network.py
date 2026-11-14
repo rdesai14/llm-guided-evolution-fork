@@ -189,7 +189,7 @@ def main(n_starts=N_STARTS, fingerprint=fingerprint):
     args = ap.parse_args()
 
     t0 = time.perf_counter()
-    X_tr, X_va, X_te, y_tr, y_va, y_te = load_data()
+    X_tr, X_va, _, y_tr, y_va, _ = load_data()
 
     qc, xp, wp = build_circuit()
     if len(wp) == 0:
@@ -228,17 +228,13 @@ def main(n_starts=N_STARTS, fingerprint=fingerprint):
             w = _BEST[1]
         finally:
             _COUNTING = False
-        # Every circuit is also scored on test as soon as it is trained, the way
-        # ExquisiteNetV2's train.py scores every individual (2026-10-01). Test is
-        # recorded in the metrics file only; selection reads validation.
+        # No test scores here (2026-11-14): a run never sees the 30 test flowers. final_eval.py
+        # retrains the circuits a run selected and scores them on test once, afterwards.
         starts.append({
             "seed": SEED, "train_passes": _PASSES,
             "val_accuracy": accuracy(qc, xp, wp, w, X_va, y_va),
             "val_cross_entropy": cross_entropy(qc, xp, wp, w, X_va, y_va),
             "val_soft_accuracy": soft_accuracy(qc, xp, wp, w, X_va, y_va),
-            "test_accuracy": accuracy(qc, xp, wp, w, X_te, y_te),
-            "test_soft_accuracy": soft_accuracy(qc, xp, wp, w, X_te, y_te),
-            "test_cross_entropy": cross_entropy(qc, xp, wp, w, X_te, y_te),
             "train_accuracy": accuracy(qc, xp, wp, w, X_tr, y_tr),
             "train_cross_entropy": cross_entropy(qc, xp, wp, w, X_tr, y_tr),
         })
@@ -256,7 +252,6 @@ def main(n_starts=N_STARTS, fingerprint=fingerprint):
     # average VALIDATION accuracy over the starts; the cross-entropy rides along as
     # a third value.
     val_acc, val_ce = avg["val_accuracy"], avg["val_cross_entropy"]
-    test_acc, test_ce = avg["test_accuracy"], avg["test_cross_entropy"]
     obj1 = 1.0 - val_acc
     obj2 = min(gate_count(qc), MAX_GATE_COST)
 
@@ -269,7 +264,7 @@ def main(n_starts=N_STARTS, fingerprint=fingerprint):
     print(f"  obj1 val error {obj1:.4f} ({val_acc:.1%} acc)   obj2 gates {obj2:.0f}"
           f"   [val cross-entropy {val_ce:.4f}]")
     print(f"  averaged over {n_starts} starts:   train acc {avg['train_accuracy']:.1%}"
-          f"   val acc {val_acc:.1%}   test acc {test_acc:.1%}"
+          f"   val acc {val_acc:.1%}"
           f"   val soft acc {avg['val_soft_accuracy']:.1%}")
     print("  val acc per start: " + " ".join(f"{s['val_accuracy']:.1%}" for s in starts))
 
@@ -283,8 +278,7 @@ def main(n_starts=N_STARTS, fingerprint=fingerprint):
         "gene_id": args.gene_id,
         "obj1_val_error": obj1, "obj2_gates": obj2,
         "val_accuracy": val_acc, "val_cross_entropy": val_ce,
-        "test_accuracy": test_acc, "test_cross_entropy": test_ce,
-        "val_soft_accuracy": avg["val_soft_accuracy"], "test_soft_accuracy": avg["test_soft_accuracy"],
+        "val_soft_accuracy": avg["val_soft_accuracy"],
         "train_accuracy": avg["train_accuracy"], "train_cross_entropy": avg["train_cross_entropy"],
         "val_accuracy_sd": float(np.std([s["val_accuracy"] for s in starts])),
         "gates": gate_count(qc),
