@@ -52,4 +52,4 @@ else
     echo "Skipping island controller submission (SUBMIT_ISLAND_CONTROLLER=${SUBMIT_ISLAND_CONTROLLER})"
 fi
 
-uv run python -m uvicorn server:app --host $SERVER_HOSTNAME --port 8137 --workers 1
+uv run python -m uvicorn server:app --host $SERVER_HOSTNAME --port "${LLMGE_PORT:-8137}" --workers 1   # per-person port, set by experiments/exp1/next_trial.sh
