@@ -95,7 +95,20 @@ class BudgetSpent(Exception):
     """Raised inside forward() when an individual has used its training budget."""
 
 
-def forward(qc, x_params, w_params, x_vals, w_vals):
+# Readout (locked 2026-11-09): marginal over READOUT qubits -> class probabilities.
+# EXAQC's scheme throws away the |11> mass and renormalizes the rest. This was an evolvable
+# block until Llama started "improving" circuits by rewriting it (a softmax, N_CLASSES = 10)
+# instead of changing the circuit, so it lives here now and forward() binds this copy:
+# a block that redefines readout_probabilities, N_CLASSES or READOUT changes nothing.
+def readout_probabilities(probs, n_classes=N_CLASSES):
+    p = np.asarray(probs[:n_classes], dtype=float)
+    total = p.sum()
+    if total <= 0:
+        return np.full(n_classes, 1.0 / n_classes)
+    return p / total
+
+
+def forward(qc, x_params, w_params, x_vals, w_vals, _readout=readout_probabilities, _qubits=tuple(READOUT)):
     """Bind one sample plus the weights and return class probabilities."""
     global _PASSES
     if _COUNTING:
@@ -104,8 +117,8 @@ def forward(qc, x_params, w_params, x_vals, w_vals):
             raise BudgetSpent(f"training budget of {TRAIN_BUDGET_EVALS} passes is spent")
     bound = qc.assign_parameters(
         {**dict(zip(x_params, x_vals)), **dict(zip(w_params, w_vals))})
-    probs = Statevector(bound).probabilities(READOUT)
-    return readout_probabilities(probs)
+    probs = Statevector(bound).probabilities(list(_qubits))
+    return _readout(probs)
 
 
 def cross_entropy(qc, xp, wp, w_vals, X, y):
@@ -230,6 +243,12 @@ def main(n_starts=N_STARTS, fingerprint=fingerprint):
             "train_cross_entropy": cross_entropy(qc, xp, wp, w, X_tr, y_tr),
         })
     SEED = base_seed
+    # A training block that pins its own start (SEED = 42 inside train_angles, seen ~1 in 15
+    # rewrites in Nov 2026) turns 10 trainings into one training repeated 10 times. Different
+    # starts never finish on identical losses, so identical ones mean a fixed start: reject.
+    if n_starts > 1 and len({(s["train_cross_entropy"], s["val_cross_entropy"]) for s in starts}) == 1:
+        raise ValueError(f"all {n_starts} trainings came out identical: train_angles must draw its "
+                         "starting angles from np.random.default_rng(SEED), not from a fixed number")
     avg = {key: float(np.mean([s[key] for s in starts])) for key in starts[0] if key != "seed"}
 
     # Both objectives MINIMIZE and both are what EXAQC's Table 1 reports: accuracy
@@ -334,18 +353,6 @@ def build_circuit():
         offset = build_variational_layer(qc, w_params, offset)
         build_entanglement(qc)
     return qc, list(x_params), list(w_params)
-
-
-# --OPTION--
-# Readout: marginal over READOUT qubits -> class probabilities.
-# EXAQC's scheme throws away the |11> mass and renormalizes the rest. That
-# discarded amplitude is a known wart, kept here for faithfulness.
-def readout_probabilities(probs):
-    p = np.asarray(probs[:N_CLASSES], dtype=float)
-    total = p.sum()
-    if total <= 0:
-        return np.full(N_CLASSES, 1.0 / N_CLASSES)
-    return p / total
 
 
 # --OPTION--

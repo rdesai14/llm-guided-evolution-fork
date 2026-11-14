@@ -20,10 +20,10 @@ import sys
 import pathlib
 
 SEED_FILE = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else pathlib.Path(__file__).parent / "seed_vqc.py"
-MUST_BE_PROTECTED = ["load_data", "gate_count", "forward", "cross_entropy",
+MUST_BE_PROTECTED = ["load_data", "gate_count", "readout_probabilities", "forward", "cross_entropy",
                      "accuracy", "soft_accuracy", "write_results", "main"]
 MUST_BE_EVOLVABLE = ["build_feature_map", "build_variational_layer", "build_entanglement",
-                     "build_circuit", "readout_probabilities", "train_angles"]
+                     "build_circuit", "train_angles"]
 
 src = SEED_FILE.read_text()
 parts = re.split(r"# --OPTION--", src)
