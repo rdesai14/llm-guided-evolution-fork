@@ -51,18 +51,19 @@ READOUT = [0, 1]          # ceil(log2(3)) = 2, EXAQC's readout sizing
 MAX_GATE_COST = 500.0     # cost ceiling; runaway circuits are not interesting
 
 
-def load_data():
+def load_data(seed=SEED):
     """Fixed split, shared by every individual. Scaler is fit on TRAIN ONLY.
 
     60/20/20: test is 20% (30 flowers), validation is a quarter of the rest (30),
     training is what's left (90). Changed from test_size=0.3 on 2026-09-30, so runs
     5954305 and earlier (78/27/45) are not comparable with runs after it.
+    seed is bound when the header runs (2026-11-16), so a block that sets SEED cannot move flowers.
     """
     X, y = load_iris(return_X_y=True)
     X_tr_full, X_te, y_tr_full, y_te = train_test_split(
-        X, y, test_size=0.2, random_state=SEED, stratify=y)
+        X, y, test_size=0.2, random_state=seed, stratify=y)
     X_tr, X_va, y_tr, y_va = train_test_split(
-        X_tr_full, y_tr_full, test_size=0.25, random_state=SEED, stratify=y_tr_full)
+        X_tr_full, y_tr_full, test_size=0.25, random_state=seed, stratify=y_tr_full)
 
     scaler = MinMaxScaler(feature_range=(0.0, np.pi)).fit(X_tr)
     return (scaler.transform(X_tr), scaler.transform(X_va), scaler.transform(X_te),
@@ -88,7 +89,8 @@ _PASSES = 0                     # forward() calls made while training
 _PASS_LIMIT = None              # set in main() once the training set size is known
 _COUNTING = False               # only training counts, scoring afterwards does not
 _BEST = [float("inf"), None]    # best (training loss, weights) seen while training
-N_STARTS = 10                   # trainings per individual from different starting angles; obj1 averages them
+_FIRST = [None]                 # the angles each training actually started from
+N_STARTS = 10                  # trainings per individual from different starting angles; obj1 averages them
 
 
 class BudgetSpent(Exception):
@@ -113,6 +115,8 @@ def forward(qc, x_params, w_params, x_vals, w_vals, _readout=readout_probabiliti
     global _PASSES
     if _COUNTING:
         _PASSES += 1
+        if _PASSES == 1:
+            _FIRST[0] = tuple(float(v) for v in w_vals)
         if _PASS_LIMIT is not None and _PASSES > _PASS_LIMIT:
             raise BudgetSpent(f"training budget of {TRAIN_BUDGET_EVALS} passes is spent")
     bound = qc.assign_parameters(
@@ -180,9 +184,9 @@ def fingerprint(qc, xp, wp, X):
     return h.hexdigest()
 
 
-def main(n_starts=N_STARTS, fingerprint=fingerprint):
-    # n_starts is bound here, when the protected header runs, so a block that
-    # rebinds N_STARTS cannot change how many times an individual is trained.
+def main(n_starts=N_STARTS, fingerprint=fingerprint, seed=SEED):
+    # n_starts and seed are bound here, when the protected header runs, so a block that
+    # rebinds N_STARTS or SEED cannot change how many times or from where it is trained.
     ap = argparse.ArgumentParser()
     ap.add_argument("--gene-id", default="seed")
     ap.add_argument("--out-dir", default="results")
@@ -212,39 +216,43 @@ def main(n_starts=N_STARTS, fingerprint=fingerprint):
     # meant nothing. Every circuit is now trained N_STARTS times from different
     # starting angles (SEED, SEED+1, ...), each with the full training budget, and
     # every score below is the average over the starts.
-    global _COUNTING, _PASS_LIMIT, _PASSES, SEED
+    # The starting angles are drawn here and handed to train_angles (2026-11-16). They
+    # used to be drawn inside the training block from SEED, which Llama could not see
+    # defined, so ~1 in 15 rewrites pinned it (SEED = 42) and the 10 trainings became one.
+    global _COUNTING, _PASS_LIMIT, _PASSES
     _PASS_LIMIT = TRAIN_BUDGET_EVALS * len(X_tr)
-    base_seed, starts = SEED, []
+    starts, firsts = [], []
     for k in range(n_starts):
-        SEED = base_seed + k               # train_angles reads SEED for its starting angles
+        w0 = np.random.default_rng(seed + k).uniform(0, 2 * np.pi, len(wp))
         _PASSES = 0
         _BEST[0], _BEST[1] = float("inf"), None
+        _FIRST[0] = None
         _COUNTING = True
         try:
-            w = train_angles(qc, xp, wp, X_tr, y_tr)
+            w = train_angles(qc, xp, wp, X_tr, y_tr, w0.copy())
         except BudgetSpent:
             if _BEST[1] is None:
                 raise                      # trained without using cross_entropy: no angles to keep
             w = _BEST[1]
         finally:
             _COUNTING = False
+        firsts.append(_FIRST[0])
         # No test scores here (2026-11-14): a run never sees the 30 test flowers. final_eval.py
         # retrains the circuits a run selected and scores them on test once, afterwards.
         starts.append({
-            "seed": SEED, "train_passes": _PASSES,
+            "seed": seed + k, "train_passes": _PASSES,
             "val_accuracy": accuracy(qc, xp, wp, w, X_va, y_va),
             "val_cross_entropy": cross_entropy(qc, xp, wp, w, X_va, y_va),
             "val_soft_accuracy": soft_accuracy(qc, xp, wp, w, X_va, y_va),
             "train_accuracy": accuracy(qc, xp, wp, w, X_tr, y_tr),
             "train_cross_entropy": cross_entropy(qc, xp, wp, w, X_tr, y_tr),
         })
-    SEED = base_seed
-    # A training block that pins its own start (SEED = 42 inside train_angles, seen ~1 in 15
-    # rewrites in Nov 2026) turns 10 trainings into one training repeated 10 times. Different
-    # starts never finish on identical losses, so identical ones mean a fixed start: reject.
-    if n_starts > 1 and len({(s["train_cross_entropy"], s["val_cross_entropy"]) for s in starts}) == 1:
-        raise ValueError(f"all {n_starts} trainings came out identical: train_angles must draw its "
-                         "starting angles from np.random.default_rng(SEED), not from a fixed number")
+    # A training block that ignores w0 and starts from its own fixed angles turns 10 trainings
+    # into one repeated 10 times. Compare where each training really started, not where it
+    # ended: on PACE identical starts end ~1e-8 apart, which slipped past an exact-loss check.
+    if n_starts > 1 and firsts[0] is not None and len(set(firsts)) == 1:
+        raise ValueError(f"all {n_starts} trainings started from the same angles: "
+                         "train_angles must start from the w0 it is given")
     avg = {key: float(np.mean([s[key] for s in starts])) for key in starts[0] if key != "seed"}
 
     # Both objectives MINIMIZE and both are what EXAQC's Table 1 reports: accuracy
@@ -352,12 +360,11 @@ def build_circuit():
 # --OPTION--
 # Training the angles. COBYLA is gradient-free and cheap; Adam via
 # qiskit-machine-learning + TorchConnector is the EXAQC-faithful alternative.
+# main() calls train_angles 10 times, each with different starting angles w0, and
+# averages the scores, so start from the w0 given rather than drawing your own.
 MAX_ITER = 178   # 178 is where the loss is within 1% of its final value
 
-def train_angles(qc, x_params, w_params, X, y):
-    rng = np.random.default_rng(SEED)
-    w0 = rng.uniform(0, 2 * np.pi, len(w_params))
-
+def train_angles(qc, x_params, w_params, X, y, w0):
     def objective(w):
         return cross_entropy(qc, x_params, w_params, w, X, y)
 

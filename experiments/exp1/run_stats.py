@@ -6,8 +6,10 @@
 the starting population). A circuit counts as valid when it wrote <gene>_metrics.json.
 For each circuit we also record:
   fixed_start    its training start is a hard-coded number (all 10 trainings identical),
-                 including SEED = <number> written inside the training block
-  unseeded_start its training start is random but not from SEED (fair, not reproducible)
+                 including SEED = <number> or default_rng(SEED) in the training block (since
+                 2026-11-16 SEED stays 42 and main() hands train_angles its start as w0)
+  unseeded_start its training block draws its own random start instead of using w0
+                 (fair, not reproducible)
   readout_trick  it rewrote the readout (a softmax/exp, or N_CLASSES set to something but 3)
   seed_clone     it scores exactly like the seed (89.0% val, 64.0% soft, 28 gates)
   duplicate      QD_DEDUP skipped it: it behaves like a circuit already scored (not valid)
@@ -21,6 +23,7 @@ import glob, json, os, re, sys
 
 FIXED_RE = re.compile(r"default_rng\(\s*\d+\s*\)|np\.random\.seed\(\s*\d+\s*\)|random_state\s*=\s*\d+")
 LOCAL_SEED_RE = re.compile(r"^\s+SEED\s*=\s*\d+", re.M)  # pins SEED inside train_angles; default_rng(SEED) then reads it
+OWN_RNG_RE = re.compile(r"default_rng\(|np\.random\.|\brandom\.")  # the block draws random numbers itself
 
 run_dir, models, results, out = sys.argv[1:5]
 cutoffs = {int(g): float(t) for g, t in zip(sys.argv[5::2], sys.argv[6::2])}  # gen -> epoch
@@ -48,10 +51,10 @@ for gdir in sorted(glob.glob(os.path.join(run_dir, "[0-9]*")), key=lambda p: int
         evolved = MARK.join(src.split(MARK)[1:])
         train = src.split(MARK)[-1]
         r = {"gen": gen, "gene": gene, "made": bool(src), "submitted": os.path.getmtime(sh),
-             "fixed_start": bool(src) and (bool(LOCAL_SEED_RE.search(train)) or
-                                           ("default_rng(SEED)" not in train and bool(FIXED_RE.search(train)))),
-             "unseeded_start": bool(src) and "default_rng(SEED)" not in src.split(MARK)[-1]
-                               and not FIXED_RE.search(src.split(MARK)[-1]),
+             "fixed_start": bool(src) and bool(LOCAL_SEED_RE.search(train) or FIXED_RE.search(train)
+                                               or "default_rng(SEED)" in train),
+             "unseeded_start": bool(src) and bool(OWN_RNG_RE.search(train)) and not FIXED_RE.search(train)
+                               and "default_rng(SEED)" not in train,
              "readout_trick": bool(src) and readout_trick(evolved)}
         mpath = os.path.join(results, f"{gene}_metrics.json")
         m = json.load(open(mpath)) if os.path.exists(mpath) else {}
