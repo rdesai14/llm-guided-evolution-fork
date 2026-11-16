@@ -26,6 +26,10 @@ export HF_HOME=/storage/ice-shared/vip-vvk/llm_storage/
 # Change to the repository root (server.sh submits this job from it)
 cd "$SLURM_SUBMIT_DIR"
 
+# A controller SLURM requeued after a node failure must not start a second evolution
+# next to the one still running (that doubled all_1's generations 28-34, Nov 15).
+while squeue -h -u "$USER" -n Islands_script -t PENDING,RUNNING | grep -q .; do sleep 60; done
+
 uv run python islands_wrapper.py quantum_run \
     --num_islands 1 \
     --llms llama3 \
