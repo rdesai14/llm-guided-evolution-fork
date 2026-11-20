@@ -4,7 +4,7 @@
 #SBATCH -q coe-ice
 #SBATCH -p coe-gpu
 #SBATCH -t 8:00:00              # 2 GPUs x 16h trips QOSMaxGRESMinutesPerJob; chain with sbatch server.sh <count>
-#SBATCH --exclude=atl1-1-03-010-10-0,atl1-1-03-011-13-0,atl1-1-03-011-18-0
+#SBATCH --exclude=atl1-1-03-010-10-0,atl1-1-03-011-13-0,atl1-1-03-011-18-0,atl1-1-03-014-16-0
 #SBATCH --nodes=1
 #SBATCH -G 2
 #SBATCH -C "H200"
